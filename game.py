@@ -2,7 +2,7 @@
 import pygame
 import random
 #1 配置图片地址
-IMAGE_PATH = 'imgs/'
+IMAGE_PATH = "imgs/"
 #1 设置页面宽高
 scrrr_width=800
 scrrr_height =560
