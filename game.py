@@ -44,14 +44,14 @@ class Sunflower(Plant):
         self.rect.x = x
         self.rect.y = y
         self.price = 50
-        self.hp = 100
+        self.hp = 300 #原100
         #5 时间计数器
         self.time_count = 0
 
     #5 新增功能：生成阳光
     def produce_money(self):
         self.time_count += 1
-        if self.time_count == 25:
+        if self.time_count == 60:   #25改成60
             MainGame.money += 5
             self.time_count = 0
     #5 向日葵加入到窗口中
@@ -67,7 +67,7 @@ class PeaShooter(Plant):
         self.rect.x = x
         self.rect.y = y
         self.price = 50
-        self.hp = 200
+        self.hp = 600  #原200
         #6 发射计数器
         self.shot_count = 0
 
@@ -119,43 +119,45 @@ class PeaBullet(pygame.sprite.Sprite):
                 self.live = False
                 #僵尸掉血
                 zombie.hp -= self.damage
-                if zombie.hp <= 0:
+                if zombie.hp <= 0 and zombie.live:   # 加 live 判断：防止同一帧多发子弹重复结算
                     zombie.live = False
                     self.nextLevel()
-    #7闯关方法
+    #7闯关方法：难度已改为由波数驱动，这里只负责记分
     def nextLevel(self):
         MainGame.score += 20
-        MainGame.remnant_score -=20
-        for i in range(1,100):
-            if MainGame.score==100*i and MainGame.remnant_score==0:
-                    MainGame.remnant_score=100*i
-                    MainGame.shaoguan+=1
-                    MainGame.produce_zombie+=50
-
-
 
     def display_peabullet(self):
         MainGame.window.blit(self.image,self.rect)
 #9 僵尸类
 class Zombie(pygame.sprite.Sprite):
-    def __init__(self,x,y):
+    IMAGE = {
+        'normal': 'imgs/zombie.png',
+        'fast':   'imgs/zombie_fast.png',    # 新定义了两种僵尸
+        'tank':   'imgs/zombie_tank.png',
+    }
+    KINDS = {
+        'normal': {'hp': 300, 'speed': 1, 'damage': 1},
+        'fast':   {'hp': 150, 'speed': 3, 'damage': 1},   # 快而脆
+        'tank':   {'hp': 900, 'speed': 1, 'damage': 2},   # 肉而慢
+    }
+
+    def __init__(self, x, y, kind='normal'):
         super(Zombie, self).__init__()
-        self.image = pygame.image.load('imgs/zombie.png')
+        self.kind = kind
+        attr = Zombie.KINDS[kind]
+        try:
+            img = pygame.image.load(Zombie.IMAGE[kind])
+        except Exception:                     # 缺素材时退回普通僵尸，不崩溃
+            img = pygame.image.load('imgs/zombie.png')
+        self.image = pygame.transform.scale(img, (80, 80))
         self.rect = self.image.get_rect()
         self.rect.x = x
         self.rect.y = y
-        self.hp = 1000
-        self.damage = 2
-        self.speed = 1
+        self.hp = int(attr['hp'] * (1 + (MainGame.wave - 1) * 0.12))  # 血量随波数涨，末波约 2.3 倍
+        self.speed = attr['speed']
+        self.damage = attr['damage']
         self.live = True
         self.stop = False
-    #9 僵尸的移动
-    def move_zombie(self):
-        if self.live and not self.stop:
-            self.rect.x -= self.speed
-            if self.rect.x < -80:
-                #8 调用游戏结束方法
-                MainGame().gameOver()
 
     #9 判断僵尸是否碰撞到植物，如果碰撞，调用攻击植物的方法
     def hit_plant(self):
@@ -177,6 +179,14 @@ class Zombie(pygame.sprite.Sprite):
             plant.live = False
             #8 修改僵尸的移动状态
             self.stop = False
+
+    #9 僵尸的移动
+    def move_zombie(self):
+        if self.live and not self.stop:
+            self.rect.x -= self.speed
+            if self.rect.x < -80:
+                # 走出屏幕左侧 = 游戏失败
+                MainGame().gameOver()
 
 
 
@@ -201,7 +211,9 @@ class MainGame():
     #9 新增存储所有僵尸的列表
     zombie_list = []
     count_zombie = 0
-    produce_zombie = 100
+    produce_zombie = 300   #原100
+    wave = 0
+    WIN_WAVE = 12
     #1 加载游戏窗口
     def init_window(self):
         #1 调用显示模块的初始化
@@ -212,7 +224,11 @@ class MainGame():
     #2 文本绘制
     def draw_text(self, content, size, color):
         pygame.font.init()
-        font = pygame.font.SysFont('kaiti', size)
+        # SysFont 在部分新系统上会崩溃，优先直接加载字体文件，失败再退回系统字体
+        try:
+            font = pygame.font.Font('C:/Windows/Fonts/simkai.ttf', size)
+        except Exception:
+            font = pygame.font.SysFont('kaiti', size)
         text = font.render(content, True, color)
         return text
 
@@ -315,25 +331,48 @@ class MainGame():
 
     #9 新增初始化僵尸的方法
     def init_zombies(self):
-        for i in range(1, 7):
+        MainGame.wave += 1
+        # 难度随波数爬升：间隔从 5 秒缩到 2 秒
+        MainGame.produce_zombie = max(120, 300 - MainGame.wave * 15)
+        lanes = [1, 2, 3, 4, 5, 6]
+        random.shuffle(lanes)  # 随机车道，有节奏感
+        if MainGame.wave >= MainGame.WIN_WAVE:
+            n = 6                                  # 最后一波 = 六路决战
+        else:
+            n = min(5, 2 + MainGame.wave // 3)     # 数量 2→5 随波数涨
+        for i in lanes[:n]:
             dis = random.randint(1, 5) * 200
-            zombie = Zombie(800 + dis, i * 80)
-            MainGame.zombie_list.append(zombie)
+            if MainGame.wave >= 5:  # 铁桶第 5 波才登场
+                kind = random.choices(['normal', 'fast', 'tank'],
+                                      weights=[60, 30, 10])[0]
+            else:
+                kind = random.choices(['normal', 'fast'],
+                                      weights=[70, 30])[0]
+            MainGame.zombie_list.append(Zombie(800 + dis, i * 80, kind))
 
-    #9将所有僵尸加载到地图中
+    #9 将所有僵尸加载到地图中
     def load_zombies(self):
         for zombie in MainGame.zombie_list:
             if zombie.live:
                 zombie.display_zombie()
                 zombie.move_zombie()
-                # v2.0 调用是否碰撞到植物的方法
                 zombie.hit_plant()
             else:
                 MainGame.zombie_list.remove(zombie)
+
+
     #1 开始游戏
     def start_game(self):
         #1 初始化窗口
         self.init_window()
+        # 背景音乐（没有音频文件也能正常游戏）
+        try:
+            pygame.mixer.init()
+            pygame.mixer.music.load('imgs/grasswalk.mp3')
+            pygame.mixer.music.play(-1)          # -1 = 无限循环
+            pygame.mixer.music.set_volume(0.4)   # 音量 0~1
+        except Exception:
+            pass
         #3 初始化坐标和地图
         self.init_plant_points()
         self.init_map()
@@ -346,8 +385,8 @@ class MainGame():
             #2 渲染的文字和坐标位置
             MainGame.window.blit(self.draw_text('当前钱数$: {}'.format(MainGame.money), 26, (255, 0, 0)), (500, 40))
             MainGame.window.blit(self.draw_text(
-                '当前关数{}，得分{},距离下关还差{}分'.format(MainGame.shaoguan, MainGame.score, MainGame.remnant_score), 26,
-                (255, 0, 0)), (5, 40))
+                '第{}波/{}波  得分{}'.format(MainGame.wave, MainGame.WIN_WAVE, MainGame.score),
+                26, (255, 0, 0)), (5, 40))
             self.load_help_text()
 
             #3 需要反复加载地图
@@ -360,9 +399,12 @@ class MainGame():
             self.deal_events()
             #9 调用展示僵尸的方法
             self.load_zombies()
-            #9 计数器增长，每数到100，调用初始化僵尸的方法
+            # 撑过目标波数且场上清空 = 通关
+            if MainGame.wave >= MainGame.WIN_WAVE and len(MainGame.zombie_list) == 0:
+                self.gameWin()
+            #9 计数器增长；目标波数刷完后不再出怪，等玩家清场后判定胜利
             MainGame.count_zombie += 1
-            if MainGame.count_zombie == MainGame.produce_zombie:
+            if MainGame.wave < MainGame.WIN_WAVE and MainGame.count_zombie >= MainGame.produce_zombie:
                 self.init_zombies()
                 MainGame.count_zombie = 0
             #9 pygame自己的休眠
@@ -372,11 +414,38 @@ class MainGame():
 
     #10 程序结束方法
     def gameOver(self):
+        try:
+            pygame.mixer.music.stop()  # 先掐掉 BGM
+        except Exception:
+            pass
+        try:
+            pygame.mixer.Sound('imgs/fail.wav').play()
+        except Exception:  # 音效文件没放也不至于崩
+            pass
         MainGame.window.blit(self.draw_text('游戏结束', 50, (255, 0, 0)), (300, 200))
+        pygame.display.update()
         print('游戏结束')
-        pygame.time.wait(400)
+        pygame.time.wait(3000)  # 原 400 太快，听不清音效
         global GAMEOVER
         GAMEOVER = True
+
+    def gameWin(self):
+        try:
+            pygame.mixer.music.stop()
+        except Exception:
+            pass
+        try:
+            pygame.mixer.Sound('imgs/win.wav').play()
+        except Exception:
+            pass
+        MainGame.window.blit(self.draw_text('恭喜通关！', 50, (255, 0, 0)), (280, 200))
+        pygame.display.update()
+        print('通关')
+        pygame.time.wait(3000)
+        global GAMEOVER
+        GAMEOVER = True
+
+
 #1 启动主程序
 if __name__ == '__main__':
     game = MainGame()
